@@ -18,5 +18,6 @@ data/ledger.json
 *.log.gz
 
 # IDEs
-.vscode/
+.vscode/*
+!.vscode/settings.json
 .idea/

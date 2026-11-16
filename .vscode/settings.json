@@ -1,0 +1,20 @@
+{
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+    "pylint.importStrategy": "fromEnvironment",
+    "pylint.lintOnChange": true,
+    "pylint.args": [
+        "--max-line-length=120"
+    ],
+    "pylint.severity": {
+        "convention": "Information",
+        "error": "Error",
+        "fatal": "Error",
+        "refactor": "Hint",
+        "warning": "Warning"
+    },
+    "flake8.importStrategy": "fromEnvironment",
+    "flake8.args": [
+        "--max-line-length=120",
+        "--extend-ignore=E501"
+    ]
+}
