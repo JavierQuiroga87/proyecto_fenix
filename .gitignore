@@ -1,0 +1,22 @@
+# Entorno virtual 
+.venv/
+venv/
+ENV/
+
+# Python cache y compilados
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Archivos de configuración local y secretos
+.env
+data/ledger.json
+
+# Logs y rotaciones locales
+*.log
+*.log.gz
+
+# IDEs
+.vscode/
+.idea/
