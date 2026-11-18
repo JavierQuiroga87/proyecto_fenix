@@ -27,4 +27,5 @@ src/ppa2_fenix.egg-info/top_level.txt
 tests/test_base.py
 tests/test_contracts.py
 tests/test_fenix.py
+tests/test_moto_fenix.py
 tests/test_scenarios.py
