@@ -1,55 +1,172 @@
-"""Guía ejecutable del integrante 6; sustituir cada pendiente por aserciones reales."""
-import pytest  # Mantiene visibles los casos sin implementar.
 
-@pytest.mark.pendiente
-def test_duplicate_is_idempotent():
-    """Comprueba que repetir un evento no repite recursos ni acciones completadas.
+"""Pruebas de diagnóstico, idempotencia y orden de confirmación - I6."""
 
-    Returns:
-        None cuando dos ejecuciones conservan el estado final esperado.
-    Raises:
-        NotImplementedError: Hasta que I6 implemente la preparación y aserciones.
-    Notes:
-        Usar un cliente falso con contador de llamadas; reinicializar el handler
-        leyendo el mismo ledger para que el ensayo represente un reinicio.
-    """
-    # TODO I6-B: preparar inventario/manifiesto válido en tmp_path y evento fijo.
-    # Ejecutar handler dos veces; verificar IDs y una sola acción efectiva.
-    # Guardar/releer el estado antes de la segunda ejecución; no usar un set en memoria.
-    raise NotImplementedError("I6-B: prueba durable de duplicados")
+import json
 
-@pytest.mark.pendiente
-def test_ack_is_after_success():
-    """Verifica que un handler fallido jamás confirma la entrega de SQS.
+import pytest
 
-    Returns:
-        None si fallo=retry sin ACK y éxito=ACK exactamente al finalizar.
-    Raises:
-        NotImplementedError: Hasta que I6 conecte fixtures y mocks del transporte.
-    Notes:
-        No reemplazar el worker entero por un mock: observar llamadas reales de run.
-    """
-    # TODO I6-C: monkeypatch receive para devolver una entrega con ReceiptHandle fijo.
-    # Reemplazar acknowledge y retry_later por funciones que anoten el orden.
-    # Ejecutar run(once=True) con handler fallido y exigir cero ACK.
-    # Repetir con handler exitoso y exigir handler primero, acknowledge después.
-    raise NotImplementedError("I6-C: probar orden y condición del ACK")
+from fenix.services import remediation, notifications, worker
+from fenix.utils.state import load
+
+
+def make_event():
+    """Genera un evento válido para el inventario de prueba."""
+    return {
+        "schema_version": 1,
+        "event_id": "evt-test-001",
+        "event_type": "instance.stopped",
+        "resource_id": "node-01",
+        "occurred_at": "2026-11-18T18:00:00Z",
+        "simulate_failures": 0,
+    }
+
+
+def test_duplicate_is_idempotent(tmp_path, monkeypatch):
+    """Una repetición no vuelve a reparar ni a notificar."""
+
+    inventory = {
+        "node-01": {"type": "ec2"}
+    }
+    event = make_event()
+    ledger_path = tmp_path / "events.json"
+
+    repair_calls = []
+    notification_calls = []
+
+    def fake_repair(event, inventory):
+        repair_calls.append(event["event_id"])
+        return {"resource_id": event["resource_id"], "status": "repaired"}
+
+    def fake_notify(event, result):
+        notification_calls.append(event["event_id"])
+
+    # Sustituimos únicamente las dependencias externas.
+    monkeypatch.setattr(
+        remediation, "repair", fake_repair, raising=False
+    )
+    monkeypatch.setattr(
+        notifications, "notify", fake_notify, raising=False
+    )
+
+    # Primera ejecución.
+    first_result = remediation.handle(
+        event, inventory, ledger_path=str(ledger_path)
+    )
+
+    assert first_result["repair_done"] is True
+    assert first_result["notified"] is True
+
+    # Simulamos la recuperación del estado desde el disco.
+    saved_state = load(str(ledger_path))
+    assert event["event_id"] in saved_state
+
+    # Segunda ejecución del mismo evento.
+    second_result = remediation.handle(
+        event, inventory, ledger_path=str(ledger_path)
+    )
+
+    # La reparación y la notificación deben ejecutarse una sola vez.
+    assert repair_calls == ["evt-test-001"]
+    assert notification_calls == ["evt-test-001"]
+
+    # El registro conserva el estado completado.
+    assert second_result["repair_done"] is True
+    assert second_result["notified"] is True
+    assert second_result["status"] == "completed"
+    assert second_result["attempts"] == 2
+
+
+def test_ack_is_after_success(tmp_path, monkeypatch):
+    """El worker solo confirma el mensaje cuando el handler termina bien."""
+
+    monkeypatch.chdir(tmp_path)
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+
+    inventory = {"node-01": {"type": "ec2"}}
+    (data_dir / "inventory.json").write_text(
+        json.dumps(inventory),
+        encoding="utf-8",
+    )
+
+    event = make_event()
+    message = {
+        "Body": json.dumps(event),
+        "ReceiptHandle": "receipt-test-001",
+        "Attributes": {"ApproximateReceiveCount": "1"},
+    }
+
+    class FakeLogger:
+        def info(self, *args, **kwargs):
+            pass
+
+        def exception(self, *args, **kwargs):
+            pass
+
+    class FakeListener:
+        def stop(self):
+            pass
+
+    monkeypatch.setattr(
+        worker, "setup",
+        lambda name: (FakeLogger(), FakeListener())
+    )
+    monkeypatch.setattr(
+        worker, "queue_url",
+        lambda prefix: "http://localhost/test-queue"
+    )
+    monkeypatch.setattr(
+        worker, "receive",
+        lambda url: [message]
+    )
+    monkeypatch.setattr(
+        worker, "mark_acknowledged",
+        lambda event_id, ledger_path: None
+    )
+
+    calls = []
+
+    def fake_ack(url, receipt):
+        calls.append("ack")
+
+    def fake_retry(url, received_message):
+        calls.append("retry")
+        return 2
+
+    monkeypatch.setattr(worker, "acknowledge", fake_ack)
+    monkeypatch.setattr(worker, "retry_later", fake_retry)
+
+    # Caso 1: el procesamiento falla.
+    def failing_handler(event, inventory, ledger_path):
+        calls.append("handler")
+        raise RuntimeError("Falla controlada de prueba")
+
+    monkeypatch.setattr(worker, "handle", failing_handler)
+
+    worker.run(once=True)
+
+    assert calls == ["handler", "retry"]
+    assert "ack" not in calls
+
+    # Caso 2: el procesamiento termina correctamente.
+    calls.clear()
+
+    def successful_handler(event, inventory, ledger_path):
+        calls.append("handler")
+        return {"status": "completed"}
+
+    monkeypatch.setattr(worker, "handle", successful_handler)
+
+    worker.run(once=True)
+
+    assert calls == ["handler", "ack"]
+
 
 @pytest.mark.integracion
 def test_redrive_with_localstack():
-    """Comprueba DLQ efectiva usando el broker, no una lista simulada en Python.
-
-    Returns:
-        None si un mensaje venenoso termina en la DLQ y el worker sigue vivo.
-    Raises:
-        NotImplementedError: Hasta implementar el ensayo con espera total acotada.
-    Side Effects:
-        Crea colas de prueba exclusivas y las limpia después de guardar evidencia.
-    Notes:
-        Usar un prefijo de test nuevo y no purgar colas del laboratorio del grupo.
-    """
-    # TODO I6-D: publicar JSON corrupto en una cola con RedrivePolicy real.
-    # Consumir con el worker y consultar DLQ con deadline total de 120 segundos.
-    # Comparar el Body original; un contador aproximado por sí solo no demuestra redrive.
-    # Si se agota el deadline, fallar con diagnóstico; no pasar el test por timeout.
-    raise NotImplementedError("I6-D: verificar redrive real en LocalStack")
+    """Pendiente hasta disponer de la configuración real de I2."""
+    pytest.skip(
+        "I6-D requiere que I2 implemente ensure_queues y retry_later "
+        "para probar el redrive real en LocalStack."
+    )
