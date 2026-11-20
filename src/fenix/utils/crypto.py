@@ -1,48 +1,49 @@
-"""Firma de apoyo y verificación a completar por el integrante 3."""
-import hashlib  # Selecciona SHA-256 para autenticar el contenido.
-import hmac  # Usa una comparación segura para las firmas.
-import time  # Comprueba la ventana temporal.
-from fenix.utils.errors import ValidationError  # Rechazo de autenticación público.
-
+import hashlib
+import hmac
+import time
+from fenix.utils.errors import ValidationError
 
 def signature(secret: str, timestamp: int, body: bytes) -> str:
-    """Firma exactamente timestamp, punto y cuerpo binario original.
-
-    Args:
-        secret: Secreto compartido de al menos 16 caracteres, leído del entorno.
-        timestamp: Unix epoch en segundos, igual al enviado en la cabecera.
-        body: Bytes exactos enviados por HTTP; no volver a serializar el JSON.
-    Returns:
-        HMAC-SHA256 hexadecimal de 64 caracteres.
-    Raises:
-        ValidationError: Si el secreto es demasiado corto.
-    """
-    if len(secret) < 16:  # Se comprueba también al enviar la prueba.
+    """Firma exactamente timestamp, punto y cuerpo binario original."""
+    if len(secret) < 16:
         raise ValidationError("Configurar WEBHOOK_SECRET de 16 caracteres o más")
-    signed = str(timestamp).encode("ascii") + b"." + body  # Prefijo autenticado.
+    signed = str(timestamp).encode("ascii") + b"." + body
     return hmac.new(secret.encode("utf-8"), signed, hashlib.sha256).hexdigest()
 
-
 def verify(secret: str, header: str, body: bytes, now: int | None = None) -> None:
-    """Rechaza cabeceras ambiguas y firmas o fechas inválidas.
+    """Rechaza cabeceras ambiguas y firmas o fechas inválidas."""
+    # 1. Separar por comas y validar que sean exactamente 2 partes (t y v1)
+    parts = header.split(',')
+    if len(parts) != 2:
+        raise ValidationError("Cabecera inválida: formato incorrecto")
+    
+    # 2. Extraer t y v1
+    try:
+        t_part = parts[0].strip().split('=')
+        v1_part = parts[1].strip().split('=')
+        if t_part[0] != 't' or v1_part[0] != 'v1':
+            raise ValueError
+        timestamp_str = t_part[1]
+        v1_hex = v1_part[1]
+    except (IndexError, ValueError):
+        raise ValidationError("Cabecera inválida: claves duplicadas o incorrectas")
 
-    Args:
-        secret: Secreto compartido del entorno, nunca del payload.
-        header: Cabecera exacta t=<epoch>,v1=<hex> sin claves duplicadas.
-        body: Bytes del cuerpo antes de llamar a json.loads.
-        now: Reloj inyectable para pruebas; None usa time.time.
-    Returns:
-        None si las comprobaciones son satisfactorias.
-    Raises:
-        ValidationError: Formato inválido, firma incorrecta o diferencia mayor a 300 s.
-        NotImplementedError: Mientras no se complete TODO I3-A.
-    Notes:
-        La ventana de tiempo mitiga replay antiguo. No impide repetir un evento
-        válido dentro de la ventana; event_id e idempotencia cubren ese caso.
-    """
-    # TODO I3-A: separar por comas; exigir exactamente t y v1 una sola vez.
-    # Rechazar timestamp no entero y v1 que no tenga 64 caracteres hexadecimales.
-    # Usar abs((int(time.time()) if now is None else now) - timestamp) <= 300.
-    # Calcular signature y comparar con hmac.compare_digest; no usar ==.
-    # Convertir fallos de parseo en ValidationError sin mostrar header ni secreto.
-    raise NotImplementedError("I3-A: verificar HMAC y fecha")
+    # 3. Validar timestamp
+    try:
+        timestamp = int(timestamp_str)
+    except ValueError:
+        raise ValidationError("Timestamp inválido: no es un entero")
+
+    # 4. Validar firma hexadecimal de 64 caracteres
+    if len(v1_hex) != 64 or not all(c in '0123456789abcdefABCDEF' for c in v1_hex):
+        raise ValidationError("Firma inválida: no es hexadecimal de 64 caracteres")
+
+    # 5. Validar ventana de tiempo (300 segundos máximo)
+    current_time = int(time.time()) if now is None else now
+    if abs(current_time - timestamp) > 300:
+        raise ValidationError("Firma expirada: diferencia mayor a 300 segundos")
+
+    # 6. Recalcular y comparar de forma segura
+    expected_v1 = signature(secret, timestamp, body)
+    if not hmac.compare_digest(expected_v1, v1_hex):
+        raise ValidationError("Firma inválida: no coincide")
