@@ -112,3 +112,10 @@ class NotificationError(ProjectError):
 
 class StateError(ProjectError):
     """Fallo en la persistencia o lectura atómica del ledger local."""
+class TransientError(Exception):
+    """Error temporal (ej. fallo de red). El mensaje se puede reintentar."""
+    pass
+
+class RemediationError(Exception):
+    """Error permanente durante la reparación. No tiene sentido reintentar."""
+    pass
