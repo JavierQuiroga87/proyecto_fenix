@@ -162,3 +162,257 @@ python -c "from fenix.services.events import validate; validate({'schema_version
 aws --endpoint-url=http://localhost:4566 sqs get-queue-attributes --queue-url http://localhost:4566/000000000000/fenix-grupo01-events --attribute-names ApproximateNumberOfMessages
 ```
 ---
+
+## 4. Integrante 6 – Diagnóstico, Pruebas y Caos
+
+
+
+### Responsabilidad
+
+
+
+El Integrante 6 desarrolla herramientas y pruebas automatizadas para verificar la seguridad, la tolerancia a fallas y la capacidad de recuperación de Proyecto Fénix.
+
+
+
+Su trabajo se concentra en dos objetivos:
+
+
+
+- Provocar fallas controladas en recursos propios del laboratorio para comprobar los mecanismos de autorreparación.
+
+- Verificar mediante pruebas automatizadas que el sistema valide eventos, proteja los recursos, procese mensajes correctamente y mantenga la trazabilidad de las operaciones.
+
+
+
+### Archivos desarrollados
+
+
+
+- `tests/demo/inject_fault.py`: herramienta CLI para inyectar fallas controladas en recursos EC2 y S3.
+
+- `tests/demo/notify_stub.py`: simulador de notificaciones para probar errores temporales y permanentes sin llamadas de red.
+
+- `tests/test_fenix.py`: pruebas de seguridad HMAC, validación de eventos y logs JSON.
+
+- `tests/test_inject_fault.py`: pruebas unitarias de seguridad y comportamiento del inyector.
+
+- `tests/test_scenarios.py`: pruebas de idempotencia, orden de confirmación ACK y redrive hacia DLQ.
+
+
+
+### A. Herramienta de inyección de fallas
+
+
+
+El módulo `tests/demo/inject_fault.py` permite provocar fallas controladas sobre recursos registrados en `data/inventory.json`.
+
+
+
+La herramienta acepta exclusivamente estos alias:
+
+
+
+- `node-01`: detiene una instancia EC2 propia cuando se encuentra en estado `running`.
+
+- `bucket-01`: elimina la etiqueta `Owner` de un bucket S3 propio, conservando las demás etiquetas.
+
+
+
+Antes de modificar un recurso, verifica:
+
+
+
+1\. Que exista la variable de entorno `GROUP_ID`.
+
+2\. Que el alias esté registrado en el inventario.
+
+3\. Que el tipo y el identificador del recurso sean válidos.
+
+4\. Que las etiquetas de propiedad correspondan al grupo configurado.
+
+5\. Que el recurso se encuentre en un estado compatible con la operación.
+
+
+
+La herramienta no acepta identificadores arbitrarios de AWS, no termina instancias, no elimina buckets y no borra colas.
+
+
+
+También contempla la repetición segura: si la falla ya fue aplicada, informa `already_injected` y no vuelve a modificar el recurso.
+
+
+
+### B. Ejecución de la herramienta
+
+
+
+Desde la raíz del repositorio:
+
+
+
+```powershell
+
+# Consultar los argumentos disponibles
+
+python -m tests.demo.inject_fault --help
+
+
+
+# Inyectar una falla controlada en EC2
+
+python -m tests.demo.inject_fault node-01
+
+
+
+# Inyectar una falla controlada en S3
+
+python -m tests.demo.inject_fault bucket-01
+
+```
+
+
+
+Requisitos previos:
+
+
+
+- Tener el entorno virtual activado y las dependencias instaladas.
+
+- Tener LocalStack iniciado y accesible.
+
+- Haber generado los recursos de demostración y el inventario mediante el procedimiento de configuración del proyecto.
+
+- Tener configurado `GROUP_ID` en el entorno o en el archivo `.env`.
+
+
+
+### C. Pruebas de seguridad, validación y trazabilidad
+
+
+
+El archivo `tests/test_fenix.py` contiene pruebas para distintos requisitos funcionales:
+
+
+
+- **F04 – Autenticación HMAC:** rechaza firmas incorrectas, marcas de tiempo fuera de la ventana permitida y campos de firma duplicados. También comprueba el límite temporal de 300 segundos.
+
+- **F05 – Integridad del mensaje:** verifica que la firma autentique los bytes originales del cuerpo HTTP. Un JSON con el mismo significado, pero con bytes diferentes, no debe considerarse el mismo mensaje firmado.
+
+- **F07 – Validación del contrato:** acepta recursos incluidos en el inventario y rechaza recursos ajenos, campos adicionales y valores de tipo incorrecto.
+
+- **F16 – Logs:** comprueba que los registros JSON mantengan campos de correlación y que la rotación genere archivos históricos comprimidos en formato `.gz`.
+
+
+
+### D. Pruebas del inyector y simulación de notificaciones
+
+
+
+El archivo `tests/test_inject_fault.py` utiliza clientes simulados (`FakeEC2` y `FakeS3`) para verificar las operaciones sin modificar recursos reales.
+
+
+
+Se comprueban los siguientes escenarios:
+
+
+
+- Detención de una instancia EC2 perteneciente al grupo.
+
+- Repetición segura cuando la instancia ya está detenida.
+
+- Rechazo de recursos cuyas etiquetas pertenecen a otro grupo.
+
+- Eliminación exclusiva de la etiqueta `Owner` en S3.
+
+- Conservación de etiquetas adicionales, como `Department`.
+
+- Rechazo de alias que no existen en el inventario.
+
+
+
+También se utiliza NotifyStub para simular respuestas de notificación:
+
+
+
+- Error temporal 429, seguido de una respuesta exitosa.
+
+
+
+- Error permanente sin realizar conexiones externas.
+
+
+
+### E. Pruebas de idempotencia y procesamiento del worker
+
+
+
+El archivo tests/test_scenarios.py verifica dos comportamientos fundamentales:
+
+
+
+Idempotencia del procesamiento
+
+
+
+Cuando se procesa dos veces el mismo evento, el ledger permite reconocer que ya fue atendido. La reparación y la notificación no deben ejecutarse nuevamente. La prueba comprueba que el estado final sea completed y que el registro conserve el número de intentos.
+
+
+
+Orden de confirmación ACK
+
+
+
+Se comprueba que el worker confirme el mensaje únicamente después de que el procesamiento finalice correctamente:
+
+
+
+Si el handler falla, se solicita un reintento y no se ejecuta el ACK.
+
+
+
+Si el handler termina correctamente, se ejecuta el ACK después del procesamiento.
+
+
+
+Redrive hacia DLQ
+
+
+
+Existe una prueba de integración identificada como test_redrive_with_localstack. Se encuentra omitida intencionalmente hasta completar la implementación de ensure_queues y retry_later, correspondientes al Integrante 2. Por lo tanto, no se considera una integración verificada.
+
+
+
+### F. Comandos de ejecución de las pruebas
+
+
+
+Ejecutar desde la raíz del repositorio con el entorno virtual activado:
+
+
+
+# Pruebas de seguridad, contratos y logs
+
+python -m pytest tests/test_fenix.py -v
+
+
+
+# Pruebas del inyector y simulador de notificaciones
+
+python -m pytest tests/test_inject_fault.py -v
+
+
+
+# Pruebas de idempotencia, ACK y redrive
+
+python -m pytest tests/test_scenarios.py -v
+
+
+
+# Ejecutar toda la suite
+
+python -m pytest -v
+
+
+
+Las pruebas unitarias utilizan dependencias simuladas cuando corresponde, para verificar el comportamiento de forma controlada. Las pruebas de integración con LocalStack deben ejecutarse cuando estén disponibles todas las implementaciones y configuraciones necesarias.
