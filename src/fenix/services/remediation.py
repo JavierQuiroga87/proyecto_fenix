@@ -108,5 +108,52 @@ def handle(
             record["status"] = "notification_pending"
             save(ledger_path, ledger)
             raise
+import boto3
+from botocore.exceptions import ClientError
+from fenix.utils.errors import TransientError, RemediationError
 
-    return deepcopy(record)
+LOCALSTACK_URL = "http://localhost:4566"
+REGION = "us-east-1"
+
+def repair(event: dict, inventory: dict) -> dict:
+    """Función convergente de reparación con Boto3."""
+    resource_id = event.get("resource_id")
+    event_type = event.get("event_type")
+    
+    ec2 = boto3.client('ec2', endpoint_url=LOCALSTACK_URL, region_name=REGION,
+                       aws_access_key_id='test', aws_secret_access_key='test')
+    s3 = boto3.client('s3', endpoint_url=LOCALSTACK_URL, region_name=REGION,
+                      aws_access_key_id='test', aws_secret_access_key='test')
+
+    try:
+        if event_type == "instance.stopped":
+            try:
+                response = ec2.describe_instances(InstanceIds=[resource_id])
+                state = response['Reservations'][0]['Instances'][0]['State']['Name']
+                
+                if state != 'running':
+                    ec2.start_instances(InstanceIds=[resource_id])
+                    return {"action": "ec2_started", "resource_id": resource_id, "status": "success"}
+                return {"action": "none", "resource_id": resource_id, "status": "already_running"}
+            except ClientError as e:
+                raise TransientError(f"Error de AWS al reparar EC2: {e}")
+
+        elif event_type == "s3.tags_missing":
+            expected_tags = inventory.get(resource_id, {}).get("tags", {})
+            if not expected_tags:
+                return {"action": "none", "resource_id": resource_id, "status": "no_tags_in_inventory"}
+
+            tag_set = [{'Key': k, 'Value': v} for k, v in expected_tags.items()]
+            
+            try:
+                s3.put_bucket_tagging(Bucket=resource_id, Tagging={'TagSet': tag_set})
+                return {"action": "s3_tags_restored", "resource_id": resource_id, "status": "success"}
+            except ClientError as e:
+                raise TransientError(f"Error de AWS al reparar S3: {e}")
+
+        return {"action": "ignored", "resource_id": resource_id, "status": "unsupported_event"}
+
+    except TransientError:
+        raise 
+    except Exception as e:
+        raise RemediationError(f"Error inesperado en reparación: {str(e)}")
