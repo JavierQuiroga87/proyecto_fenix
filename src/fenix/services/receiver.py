@@ -17,7 +17,7 @@ except ImportError:
             from fenix.services.sqs import send_sqs_message
         except ImportError:
             try:
-                from fenix.services.sqs import publis
+                from fenix.services.sqs import publish
             except ImportError:
                 send_message = None
 
