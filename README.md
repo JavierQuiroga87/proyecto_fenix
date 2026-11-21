@@ -15,16 +15,19 @@ Además, el sistema utiliza un registro local de estado (`ledger.json`) para gua
 
 El entorno de integración previsto es AWS LocalStack. Para las pruebas locales también se utilizó Moto, una herramienta de Python que permite simular servicios de AWS.
 
+Video Defensa 
+[Link al Video](https://drive.google.com/file/d/1m-sY7oNHO6HCSOODoEg72JFEJWyr9w01/view)
+
 ## 2. Integrantes y responsabilidades
 
 | Integrante | Rol | Archivos principales | Responsabilidad |
 |---|---|---|---|
-| Integrante 1 | Entradas, excepciones y validación | `errors.py`, `validation.py`, `events.py` | Validación de eventos y manejo de errores. |
-| Integrante 2 | Mensajería e inventario Cloud | `settings.py`, `sqs.py`, `demo.py` | Configuración de clientes, colas SQS, DLQ e inventario. |
-| Integrante 3 | Webhooks y reparación Boto3 | `crypto.py`, `receiver.py`, `remediation.py` (`repair`) | Autenticación HMAC, recepción HTTP y reparación de recursos. |
-| Integrante 4 | Observabilidad y comunicación | `logging_json.py`, `notifications.py` | Registros JSON y envío de notificaciones. |
-| Integrante 5 | Integración y Worker | `worker.py`, `remediation.py` (`handle`), `cli.py` | Procesamiento de mensajes, persistencia por etapas, ACK e interfaz CLI. |
-| Integrante 6 | Diagnóstico y pruebas | `tests/`, `tests/demo/inject_fault.py` | Pruebas automatizadas e inyección de fallas. |
+| Integrante 1 **Rafael Adán Cruz** | Entradas, excepciones y validación | `errors.py`, `validation.py`, `events.py` | Validación de eventos y manejo de errores. |
+| Integrante 2 **Mauricio Jesus Goroso Romano**| Mensajería e inventario Cloud | `settings.py`, `sqs.py`, `demo.py` | Configuración de clientes, colas SQS, DLQ e inventario. |
+| Integrante 3 **Rodrigo Tarqui Gutierrez**| Webhooks y reparación Boto3 | `crypto.py`, `receiver.py`, `remediation.py` (`repair`) | Autenticación HMAC, recepción HTTP y reparación de recursos. |
+| Integrante 4 **Javier Alejandro Quiroga** | Observabilidad y comunicación | `logging_json.py`, `notifications.py` | Registros JSON y envío de notificaciones. |
+| Integrante 5 **Noemí Barragan** | Integración y Worker | `worker.py`, `remediation.py` (`handle`), `cli.py` | Procesamiento de mensajes, persistencia por etapas, ACK e interfaz CLI. |
+| Integrante 6 **Roberto Ezequiel Nahuel Choque** | Diagnóstico y pruebas | `tests/`, `tests/demo/inject_fault.py` | Pruebas automatizadas e inyección de fallas. |
 
 `src/fenix/utils/state.py` es un módulo de apoyo entregado para la lectura y escritura atómica del estado.
 
