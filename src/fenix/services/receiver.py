@@ -6,7 +6,7 @@ from fenix.utils.crypto import verify
 from fenix.utils.errors import ValidationError
 from fenix.services.events import validate
 
-# Intentamos importar la función de SQS de varias formas posibles por si Mauricio (I2) le puso otro nombre
+# Intentamos importar la función de SQS de varias formas posibles
 try:
     from fenix.services.sqs import send_message
 except ImportError:
@@ -16,7 +16,10 @@ except ImportError:
         try:
             from fenix.services.sqs import send_sqs_message
         except ImportError:
-            send_message = None
+            try:
+                from fenix.services.sqs import publish
+            except ImportError:
+                send_message = None
 
 app = FastAPI(title="Proyecto Fénix - Webhook Receptor")
 
