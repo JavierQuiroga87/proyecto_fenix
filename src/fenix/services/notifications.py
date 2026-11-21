@@ -1,4 +1,6 @@
+
 """Conector resiliente de notificaciones operacionales para Proyecto Fénix."""
+
 
 from __future__ import annotations
 
@@ -22,6 +24,7 @@ class NotificationConfig:
     slack_webhook_url: str = ""
     connect_timeout: float = 3.0
     read_timeout: float = 5.0
+
     max_retries: int = 3
 
     @classmethod
