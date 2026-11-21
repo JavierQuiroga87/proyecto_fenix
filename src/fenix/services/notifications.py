@@ -24,6 +24,7 @@ class NotificationConfig:
     slack_webhook_url: str = ""
     connect_timeout: float = 3.0
     read_timeout: float = 5.0
+    timeout_seconds: float | None = None
 
     max_retries: int = 3
 
@@ -42,6 +43,7 @@ class NotificationConfig:
 
 class NotificationDeliveryError(RuntimeError):
     """Se lanza cuando falla el envío de una notificación tras agotar reintentos."""
+    NotificationError = NotificationDeliveryError
 
 
 def _compute_retry_after_seconds(headers: Any, attempt: int) -> float:
@@ -141,7 +143,11 @@ class NotificationService:
         severity = level.upper()
         ctx_suffix = f" | context={json.dumps(context, ensure_ascii=False)}" if context else ""
         text = f"[{severity}] Fénix: {message}{ctx_suffix}"
-        effective_timeout = min(self.config.connect_timeout, self.config.read_timeout)
+        effective_timeout = (
+            self.config.timeout_seconds
+            if self.config.timeout_seconds is not None
+            else min(self.config.connect_timeout, self.config.read_timeout)
+        )
 
         if self.config.channel == "console":
             print(text)
@@ -205,3 +211,10 @@ def send_notification(
     """Función de conveniencia para despachar una notificación."""
     service = NotificationService(config=config, logger=logger)
     return service.send(message, level=level, context=context)
+
+def notify(*args: Any, **kwargs: Any) -> bool:
+    """Alias de compatibilidad para módulos que importan notify."""
+    if "message" in kwargs:
+        return send_notification(**kwargs)
+    message = " | ".join(str(a) for a in args) if args else "Notificación Fénix"
+    return send_notification(message)
